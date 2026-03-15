@@ -1,25 +1,25 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: N/A (new document) → 1.0.0
-Type of bump: MAJOR (initial ratification)
+Version change: 1.0.0 → 2.0.0
+Type of bump: MAJOR (replacing locked stack component: Agno → LangChain Deep Agents)
+Date amended: 2026-03-15
 
-Modified principles: N/A (new document)
+Modified principles:
+  - Principle VI (Confirmed Stack Non-Negotiability):
+    "Replace Agno with another agent framework" →
+    "Replace LangChain Deep Agents with another agent framework"
 
-Added sections:
-  - Core Principles (10 principles)
-  - Project Summary
-  - Architecture Overview
-  - Component Specifications
-  - Data Flow Diagrams
-  - Multi-Tenancy Model
-  - Agent Lifecycle
-  - Security Model
-  - Kubernetes Deployment Spec
-  - Observability Contract
-  - Development Guidelines
-  - Open Questions / Deferred Decisions
-  - Governance
+Modified sections:
+  - Architecture Overview: Agno orchestration → LangChain Deep Agents
+  - Component Specifications: "Agno Agent Framework" →
+    "LangChain Deep Agents Framework"
+  - Agent Lifecycle (Spawning, Execution): updated API references
+  - Data Flow Diagrams: updated agent instantiation description
+  - Observability Contract: AgnoInstrumentor →
+    LangChainInstrumentor
+
+Added sections: N/A
 
 Removed sections: N/A
 
@@ -32,12 +32,13 @@ Templates requiring updates:
      — Phase structure supports observability/security task types
   ✅ .specify/templates/agent-file-template.md
      — Generic template; no constitution-specific references needed
+  ✅ CLAUDE.md — Locked Stack table updated
 
 Follow-up TODOs:
   - TODO(NATS_RETENTION): Define JetStream stream retention policy
     for audit/replay
-  - TODO(GRAPHITI_VERSION): Confirm Graphiti version and Agno
-    integration path
+  - TODO(GRAPHITI_VERSION): Confirm Graphiti version and
+    LangChain Deep Agents integration path
   - TODO(COPILOTKIT_AUTH): Confirm CopilotKit AG-UI auth token
     forwarding strategy
   - TODO(CANARY_POLICY): Define canary rollout percentages per service
@@ -159,7 +160,7 @@ and NON-NEGOTIABLE. Engineers MUST NOT:
 
 - Substitute alternative ORMs for SQLAlchemy
 - Use alternative task queues for Taskiq + NATS JetStream
-- Replace Agno with another agent framework
+- Replace LangChain Deep Agents with another agent framework
 - Use alternative vector stores in lieu of Qdrant
 - Use alternative logging libraries in lieu of Loguru
 - Use alternative secrets backends in lieu of OpenBao
@@ -304,11 +305,11 @@ boundaries and communication contracts.
 ┌────────────────────────────▼────────────────────────────────┐
 │  AGENT LAYER                                                │
 │  Factory Dispatcher Agent                                   │
-│    ├── Agno Agent(team=[...]) orchestration                 │
-│    ├── AgentKnowledge (Qdrant) → Agentic RAG               │
+│    ├── LangChain Deep Agents subagent spawning              │
+│    ├── LangChain retriever → Qdrant (Agentic RAG)          │
 │    ├── Mem0 (long-term semantic memory)                     │
 │    ├── Graphiti (temporal/relational — CRM agents only)     │
-│    ├── Agno native session memory (short-term)              │
+│    ├── LangGraph Memory Store (short-term session memory)   │
 │    └── MCP server integrations                              │
 │  Specialized Agents: Email, CRM, CDP, Coding, Research,    │
 │    Productivity                                             │
@@ -399,19 +400,21 @@ class AgentDispatchResponse(BaseModel):
 
 ---
 
-### Agno Agent Framework
+### LangChain Deep Agents Framework
 
-**Responsibility**: Agent construction, multi-agent team
-orchestration, agentic RAG (knowledge search at runtime), MCP
-server tool integration, session memory management.
+**Responsibility**: Agent construction, multi-agent subagent
+spawning, agentic RAG (knowledge retrieval at runtime), MCP
+server tool integration, session memory management via LangGraph.
 
 **Exposes**: Agent instances consumed by factory dispatcher;
-`Agent.run()` and `Agent.arun()` async execution;
-`AgentKnowledge` RAG interface.
+`agent.ainvoke()` async execution via LangGraph compiled graph;
+LangChain retriever tools for RAG.
 
-**Consumes**: Qdrant (via AgentKnowledge), Mem0 (via Mem0Tools),
-Graphiti (CRM agents), LLM provider clients (via Agno model
-abstraction), MCP server endpoints.
+**Consumes**: Qdrant (via `QdrantVectorStore` + LangChain
+retriever), Mem0 (wrapped as LangChain tools), Graphiti (CRM
+agents), LLM provider clients (via LangChain chat model
+abstraction), MCP server endpoints, LangGraph Memory Store
+(short-term session state).
 
 **Configuration**:
 
@@ -420,6 +423,10 @@ abstraction), MCP server endpoints.
 - Knowledge collection names follow convention:
   `{tenant_id}_{agent_type}_{collection_name}`
 - Session memory TTL: configurable per agent type (default 1 hour)
+- Agent created with `create_deep_agent(tools=[...], system_prompt=...)`
+  from the `deepagents` package (built on LangGraph)
+- LangGraph thread/memory store keyed on `{tenant_id}:{task_id}`
+  for session isolation
 
 **Failure modes**:
 
@@ -554,8 +561,8 @@ SQLAlchemy async engine.
 **Responsibility**: Vector similarity search for agent RAG layers;
 tenant-isolated collections for knowledge base separation.
 
-**Exposes**: Qdrant REST/gRPC API; consumed via Agno's
-AgentKnowledge abstraction.
+**Exposes**: Qdrant REST/gRPC API; consumed via LangChain's
+`QdrantVectorStore` and `create_retriever_tool` abstractions.
 
 **Configuration**:
 
@@ -584,15 +591,15 @@ tracking, multi-turn conversation tracing, LLM-as-judge evals.
 
 **Exposes**: OTel OTLP endpoint (HTTP); Langfuse dashboard.
 
-**Consumes**: OTel spans from Agno via OpenInference
-AgnoInstrumentor + LangfuseSpanProcessor.
+**Consumes**: OTel spans from LangChain Deep Agents via
+`LangChainInstrumentor` + LangfuseSpanProcessor.
 
 **Configuration**:
 
 - `blocked_instrumentation_scopes`: `["fastapi", "sqlalchemy"]`
   — infrastructure spans MUST NOT reach Langfuse
-- Agno instrumented via `AgnoInstrumentor().instrument()` at
-  app startup
+- LangChain instrumented via `LangChainInstrumentor().instrument()`
+  at app startup
 - `LangfuseSpanProcessor` added to OTel `TracerProvider` with
   Langfuse OTLP exporter
 - Prompt versions managed in Langfuse UI; fetched at agent
@@ -643,7 +650,7 @@ PostgreSQL (ingestion audit log).
 **Responsibility**: Persistent semantic memory across agent
 sessions; namespaced per user, agent, and tenant.
 
-**Exposes**: Mem0Tools integration for Agno agents; `add()`,
+**Exposes**: Mem0 LangChain tool wrappers for Deep Agents; `add()`,
 `search()`, `get_all()` operations.
 
 **Configuration**:
@@ -782,13 +789,13 @@ NATS JetStream (subject: tasks.{tenant_id}.{agent_type})
   ▼ Taskiq worker picks up task
 Agent Task Worker
   │ 1. Fetch secrets from OpenBao (LLM creds, integration creds)
-  │ 2. Instantiate factory dispatcher agent (Agno)
+  │ 2. Instantiate factory dispatcher agent (LangChain Deep Agents)
   │ 3. Dispatcher analyzes request → routes to specialized agent
   │ 4. Specialized agent executes:
-  │    a. Query AgentKnowledge (Qdrant RAG)
-  │    b. Retrieve Mem0 long-term memory
+  │    a. Query Qdrant via LangChain retriever tool (RAG)
+  │    b. Retrieve Mem0 long-term memory via tool wrapper
   │    c. CRM agents: query Graphiti temporal graph
-  │    d. Call LLM provider (via Agno model abstraction)
+  │    d. Call LLM provider (via LangChain chat model abstraction)
   │    e. Execute tool calls (MCP servers, integration APIs)
   │    f. Update Mem0 memory with new context
   │ 5. Emit OTel spans: agent.dispatch, agent.llm_call,
@@ -1645,4 +1652,4 @@ a NON-NEGOTIABLE principle without a formal amendment.
 - Quarterly architecture review: assess open questions, retire
   resolved items, bump version if needed
 
-**Version**: 1.0.0 | **Ratified**: 2026-03-04 | **Last Amended**: 2026-03-04
+**Version**: 2.0.0 | **Ratified**: 2026-03-04 | **Last Amended**: 2026-03-15
